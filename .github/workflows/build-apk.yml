@@ -26,12 +26,16 @@ jobs:
         with:
           gradle-version: '8.5'
 
-      - name: Generate 10000-Day Signing Certificate (27+ Years Validity)
+      - name: Use Persistent 10000-Day Signing Certificate (Unified Key For Seamless Updates)
         run: |
           mkdir -p ~/.android
-          rm -f ~/.android/debug.keystore app/release-key.jks
-          keytool -genkeypair -v -keystore ~/.android/debug.keystore -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 -storepass android -keypass android -dname "CN=Android,O=AppFactory,C=US"
-          cp ~/.android/debug.keystore app/release-key.jks
+          if [ -f "app/release-key.jks" ] && keytool -list -keystore app/release-key.jks -storepass android >/dev/null 2>&1; then
+            cp app/release-key.jks ~/.android/debug.keystore
+          else
+            rm -f ~/.android/debug.keystore app/release-key.jks
+            keytool -genkeypair -v -keystore ~/.android/debug.keystore -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 -storepass android -keypass android -dname "CN=Android,O=AppFactory,C=US"
+            cp ~/.android/debug.keystore app/release-key.jks
+          fi
 
       - name: Build APK (10000 Days Validity)
         run: |
@@ -47,6 +51,6 @@ jobs:
       - name: Publish Direct Release APK
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v-1792761162214
-          name: "PDF Tools (1.0.0)"
+          tag_name: v-1792943221744
+          name: "PDF Tools (2.0.0)"
           files: com_studio_pdftools.apk

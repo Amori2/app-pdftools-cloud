@@ -8,6 +8,7 @@ import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
+import android.content.ClipData;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
@@ -56,8 +57,8 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         requestWindowFeature(Window.FEATURE_NO_TITLE);
-        getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN, WindowManager.LayoutParams.FLAG_FULLSCREEN);
         
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         String initBgHex = "#090D16";
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             try { getWindow().setStatusBarColor(Color.parseColor(initBgHex)); } catch (Exception ignored) { getWindow().setStatusBarColor(Color.parseColor("#090D16")); }
@@ -200,8 +201,29 @@ public class MainActivity extends Activity {
                 try {
                     Intent i = new Intent(Intent.ACTION_GET_CONTENT);
                     i.addCategory(Intent.CATEGORY_OPENABLE);
-                    i.setType("*/*");
-                    startActivityForResult(Intent.createChooser(i, "اختر ملفاً"), FILE_CHOOSER_CODE);
+                    i.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+                    String mimeType = "*/*";
+                    if (fileChooserParams != null && fileChooserParams.getAcceptTypes() != null) {
+                        String[] types = fileChooserParams.getAcceptTypes();
+                        boolean wantsImagesOnly = false;
+                        boolean wantsPdfOnly = false;
+                        for (String t : types) {
+                            if (t == null) continue;
+                            String clean = t.trim().toLowerCase();
+                            if (clean.startsWith("image/") || clean.contains(".png") || clean.contains(".jpg") || clean.contains(".jpeg")) {
+                                wantsImagesOnly = true;
+                            } else if (clean.equals("application/pdf") || clean.equals(".pdf")) {
+                                wantsPdfOnly = true;
+                            }
+                        }
+                        if (wantsImagesOnly && !wantsPdfOnly) {
+                            mimeType = "image/*";
+                        } else if (wantsPdfOnly && !wantsImagesOnly) {
+                            mimeType = "application/pdf";
+                        }
+                    }
+                    i.setType(mimeType);
+                    startActivityForResult(Intent.createChooser(i, "اختر الملفات أو الصور (يدعم التحديد المتعدد)"), FILE_CHOOSER_CODE);
                 } catch (Exception e) {
                     MainActivity.this.filePathCallback = null;
                     return false;
@@ -248,7 +270,7 @@ public class MainActivity extends Activity {
 
     private void requestNeededPermissions() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return;
-        String[] perms = new String[]{ "android.permission.CAMERA" };
+        String[] perms = new String[]{  };
         ArrayList<String> needed = new ArrayList<>();
         for (String p : perms) {
             if (checkSelfPermission(p) != PackageManager.PERMISSION_GRANTED) {
@@ -265,8 +287,19 @@ public class MainActivity extends Activity {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == FILE_CHOOSER_CODE && filePathCallback != null) {
             Uri[] results = null;
-            if (resultCode == Activity.RESULT_OK && data != null && data.getDataString() != null) {
-                results = new Uri[]{Uri.parse(data.getDataString())};
+            if (resultCode == Activity.RESULT_OK && data != null) {
+                ClipData clipData = data.getClipData();
+                if (clipData != null && clipData.getItemCount() > 0) {
+                    int count = clipData.getItemCount();
+                    results = new Uri[count];
+                    for (int i = 0; i < count; i++) {
+                        results[i] = clipData.getItemAt(i).getUri();
+                    }
+                } else if (data.getData() != null) {
+                    results = new Uri[]{ data.getData() };
+                } else if (data.getDataString() != null) {
+                    results = new Uri[]{ Uri.parse(data.getDataString()) };
+                }
             }
             filePathCallback.onReceiveValue(results);
             filePathCallback = null;
@@ -308,16 +341,33 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface
         public void saveBase64File(String base64Data, String fileName, String mimeType) {
+            saveBase64FileInFolder(base64Data, fileName, "", mimeType);
+        }
+
+        @JavascriptInterface
+        public void saveBase64FileInFolder(String base64Data, String fileName, String folderName, String mimeType) {
             try {
-                byte[] bytes = Base64.decode(base64Data, Base64.DEFAULT);
-                File dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
-                if (!dir.exists()) dir.mkdirs();
-                File outFile = new File(dir, fileName);
+                String cleanB64 = base64Data;
+                if (cleanB64 != null && cleanB64.contains(",")) {
+                    cleanB64 = cleanB64.substring(cleanB64.indexOf(",") + 1);
+                }
+                byte[] bytes = Base64.decode(cleanB64, Base64.DEFAULT);
+                File baseDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+                File targetDir = baseDir;
+                if (folderName != null && !folderName.trim().isEmpty()) {
+                    String safeFolder = folderName.trim().replace("..", "").replace('/', '_').replace(':', '_').replace('*', '_').replace('?', '_').replace('<', '_').replace('>', '_').replace('|', '_');
+                    targetDir = new File(baseDir, safeFolder);
+                }
+                if (!targetDir.exists()) targetDir.mkdirs();
+                File outFile = new File(targetDir, fileName);
                 FileOutputStream fos = new FileOutputStream(outFile);
                 fos.write(bytes);
                 fos.flush();
                 fos.close();
-                Toast.makeText(activity, "تم حفظ الملف في مجلد التنزيلات: " + fileName, Toast.LENGTH_LONG).show();
+                String msg = (folderName != null && !folderName.trim().isEmpty())
+                    ? ("تم حفظ الملف في Download/" + folderName.trim() + "/" + fileName)
+                    : ("تم حفظ الملف في التنزيلات: " + fileName);
+                Toast.makeText(activity, msg, Toast.LENGTH_LONG).show();
             } catch (Exception e) {
                 Toast.makeText(activity, "خطأ أثناء حفظ الملف: " + e.getMessage(), Toast.LENGTH_LONG).show();
             }
